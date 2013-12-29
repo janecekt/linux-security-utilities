@@ -1,0 +1,77 @@
+Content Overview
+----------------
+
+./sftp-server    << Statically compiled sftp-server to be used in the chroot envrironment
+./README         << This file
+./src            << Sources of SimpleShell
+
+
+Usage 1: SFTP Only envrionmnet with Chroot (using OpenSSH)
+---------------------------------------------------------
+
+1) Compile simple shell by running "make"
+
+2) (optional) Deploy the compiled simpleshell to the system
+  i)  Copy the statically compiled simpleshell to /bin/simpleshell
+  ii) Add /bin/simpleshell to /etc/shells
+
+3) Setup /etc/passwd as follows:
+share:x:201:200:Share:/home/chroots/share:/bin/simpleshell
+
+
+4) Setup directory structure for the chroot as follows:
+
+bash# ls -lR /home/chroots/myshare/
+/home/chroots/myshare/
+   ./bin             (drwxr-xr-x  root:root)
+      ./sftp-server  (-rwxr-xr-x  root:root)   << Statically compiled sftp-server
+      ./simpleshell  (-rwxr-xr-x  root:root)   << Statically compiled simpleshell
+
+   ./etc             (drwxr-xr-x  root:root)
+      ./group        (-rwxr--r--  root:root)   << Contains only entries about root and myshare
+      ./passwd       (-rwxr--r--  root:root)   << Contains only entries about root and myshare
+
+   ./home            (drwxr-xr-x  root:root)
+      ./share        (drwxr-xr-x  share:share)
+
+
+5) Add entry to ssh config - /etc/sshd/sshd_config
+
+Match User share
+        ChrootDirectory /home/chroots/share
+        ForceCommand /bin/simpleshell -u 0077 -w /home/share -c /bin/sftp-server --assert env{SSH_ORIGINAL_COMMAND} /usr/lib/ssh/sftp-server
+
+
+Note: How this works ?
+----------------------
+
+a) When user logs in via SSH the entry from (5) will be matched
+b) SSH will chroot to /home/chroots/share
+c) SSH will execute the command in ForceCommand using user's shell
+	/bin/simpleshell -c "/bin/simpleshell -u 0077 -w /home/share -c /bin/sftp-server --assert env{SSH_ORIGINAL_COMMAND} /usr/lib/ssh/sftp-server"
+	
+d) This in turn will execute 
+	/bin/simpleshell -u 0077 -w /home/share -c /bin/sftp-server --assert env{SSH_ORIGINAL_COMMAND} /usr/lib/ssh/sftp-server
+
+e) This will
+	i) set UMASK to 0077
+	ii) change dir to /home/share
+	iii) Verify that the environment variable SSH_ORIGINAL_COMMAND is "/usr/lib/ssh/sftp-server" 
+		(OpenSHH will set this when using the the ForceCommand)
+	iv) Exec the command /bin/sftp-server
+
+
+
+Usage 2: SFTP Only without chroot
+-----------------------------------------
+
+a) Skip step (4)
+
+b) In step (5) set-up ssh as follows
+	Match User share
+	        ForceCommand /bin/simpleshell -u 0077 -w /home/share -c /usr/lib/ssh/sftp-server --assert env{SSH_ORIGINAL_COMMAND} /usr/lib/ssh/sftp-server
+
+
+
+
+

@@ -1,0 +1,139 @@
+Sample configuration for token based IDS
+----------------------------------------
+- We have SSH (OpenSSH) and FTP (VSFTPD) both using PAM for authentication
+- We have syslong-ng to manage the logging + communication between the processes
+- blacklist.pl will add an IP to BLACKLIST chain once it runs out of tokens
+- NOTE: You may want to set-up a cron job to clear the BLACKLIST chain daily/weekly
+
+
+1) Setup /etc/pam.d/sshd (pam_trace.so to tack SSH accesses)
+
+#%PAM-1.0
+auth      required  pam_trace.so noprefix format=AUTH_AUDIT_DATA[%s:%a:%u:%H]
+auth      include   system-remote-login
+account   include   system-remote-login
+password  include   system-remote-login
+session   include   system-remote-login
+
+
+
+2) Setup /etc/pam.d/vsftpd (pam_trace.so to track FTP accesses) 
+(NOTE: We use virtual users but local users can be used as well)
+
+#%PAM-1.0
+auth       required     pam_trace.so noprefix format=AUTH_AUDIT_DATA[%s:%a:%U:%H] 
+auth       required     pam_userdb.so db=/etc/vsftpd/vsftpd.users crypt=crypt
+account    required     pam_userdb.so db=/etc/vsftpd/vsftpd.users crypt=crypt
+session    required     pam_loginuid.so
+
+
+
+3) Setup IPTables firewall /etc/iptables/iptables.rules
+   NOTE: We use iptables -j LOG to report open connections to SSH/FTP + to report FORBIDEN packets
+     Feel free to tune this base on your needs
+
+*filter
+:INPUT DROP [1273487:180715681]
+:FORWARD DROP [0:0]
+:OUTPUT DROP [0:0]
+:BLACKLIST - [0:0]
+:f_input - [0:0]
+-A INPUT -i lo -j ACCEPT 
+-A INPUT -i eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT 
+<OPTIONAL> -A INPUT -p tcp -m tcp --tcp-flags SYN,RST,ACK SYN -m limit --limit 1/sec -j f_input
+<OPTIONAL> -A INPUT -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK RST -m limit --limit 1/sec -j f_input 
+<OPTIONAL> -A INPUT -p udp -m limit --limit 1/sec -j f_input 
+<OPTIONAL> -A INPUT -p icmp -m limit --limit 1/sec -j f_input 
+-A OUTPUT -o lo -j ACCEPT 
+-A OUTPUT -o eth0 -j ACCEPT 
+-A f_input -i eth0 -j BLACKLIST 
+-A f_input -i eth0 -p tcp -m tcp --dport 22 --tcp-flags SYN,RST,ACK SYN -j LOG --log-level info --log-prefix "SSH-SYN-PACKET:"
+-A f_input -i eth0 -p tcp -m tcp --dport 21 --tcp-flags SYN,RST,ACK SYN -j LOG --log-level info --log-prefix "FTP-SYN-PACKET:"
+-A f_input -p tcp -m tcp --dport 22 -j ACCEPT 
+-A f_input -p tcp -m tcp --dport 21 -j ACCEPT 
+<OPEN OTHER PORTS AS NEEDED>
+-A f_input -i eth0 ! -s <LOCAL-NETWORK-IPs> ! -d 255.255.255.255 -j LOG --log-level info --log-prefix "DROP-PACKET:"
+COMMIT
+
+
+
+4) Copy ./src/blacklist.pl to /etc/syslog-ng/blacklist.pl
+   NOTE: This will be fed by syslog-ng (see bellow) and will count the tokens used up by
+	a) Opening connection to open port                      << From iptables
+	b) Attempt to access closed port (usually port-scan)    << From iptables
+	c) Login attempt to SSH/FTP                             << From pam_trace.so
+	d) Successful login to SSH/FTP                          << From pam_trace.so
+
+
+
+5) Configure /etc/syslog-ng/syslog-ng.conf as follows
+
+...
+
+####
+# Source
+###
+source s_log {
+  internal();
+  unix-dgram("/run/systemd/journal/syslog");
+};
+
+source s_kernel {
+  file("/proc/kmsg" program_override("kernel") );
+};
+
+...
+
+######
+# Log ssh (optional)
+######
+destination d_ssh { file("/var/log/$YEAR/$MONTH/$DAY/ssh.log"); }; 
+
+filter f_ssh { program("ssh") or (program("blacklist") and message("via sshd")) };
+
+log { source(s_log); filter(f_ssh); destination(d_ssh); };
+
+...
+
+######
+# Log vsftpd (optional)
+#####
+destination d_vsftpd { file("/var/log/$YEAR/$MONTH/$DAY/vsftpd.log"); };
+
+filter f_vsftpd     { program("vsftpd" ) or (program("blacklist") and message("via vsftpd")) };
+
+log { source(s_log); filter(f_vsftpd); destination(d_vsftpd); };
+
+...
+
+#####
+# Pass data to blacklist.pl
+####
+destination d_blacklist { program("/etc/syslog-ng/blacklist.pl" template("$MSG\n"));  };
+
+filter f_blacklist { 
+        ( program("ssh") and message( "AUTH_AUDIT_DATA" ) )
+        or ( program("vsftpd") and message( "AUTH_AUDIT_DATA" ) )
+        or ( program("kernel") and message( "(SSH-SYN-PACKET|FTP-SYN-PACKET|DROP-PACKET)" ) )
+  };
+
+log { source(s_log); source(s_kernel); filter(f_blacklist); destination(d_blacklist); };
+
+...
+
+#####
+# Log blacklist.pl
+####
+destination d_blacklist_log { file("/var/log/$YEAR/$MONTH/$DAY/blacklist.log"); };
+
+filter f_blacklist_log { program("blacklist"); };
+
+log { source(s_log); filter(f_blacklist_log); destination(d_blacklist_log); };
+
+...
+
+
+
+
+
+

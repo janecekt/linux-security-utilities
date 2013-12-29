@@ -1,0 +1,29 @@
+Sample settings (auth logging for SSH)
+--------------------------------------
+
+cat /etc/pam.d/sshd
+#%PAM-1.0
+auth      required  pam_trace.so noprefix format=AUTH_AUDIT_DATA[%s:%a:%u:%H]
+auth      include   system-remote-login
+account   include   system-remote-login
+password  include   system-remote-login
+session   include   system-remote-login
+
+
+Supported config options
+------------------------
+
+noprefix - do not prefix standard pam info about module/method etc (simply log whatever is specified in the format)
+format   - logging format %PLACEHOLDERS are replaced with pam data
+	* %s - session name e.g. sshd
+	* %a - action name e.g. authenticate, setcred, open_session, close_session
+	* %u - local user
+	* %U - remote user
+	* %H - remote host/IP
+	* %t - tty e.g. ssh
+
+
+
+
+
+
