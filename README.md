@@ -21,3 +21,9 @@ Simple token based IDS script which works in conjungtion with syslog-ng, iptable
   * A LOGIN attempt to existing service consumes C tokens (reported via pam-trace above)
   * A SUCCESSFUL-LOGIN to existing sevice sets tokes to maximum again
   * If at any point a token count reaches 0 the IP is blacklisted (i.e. blocked via iptables).
+
+
+# Contributions #
+  * **If you wish to contribute and/or submit a pull request please do so on GitLab**
+  * The repository is maintained on GitLab [https://gitlab.com/janecekt/linux-security-utilities](https://gitlab.com/janecekt/linux-security-utilities) 
+  * It is mirrored to GitHub as a read-only copy but it is not maintained there any more
